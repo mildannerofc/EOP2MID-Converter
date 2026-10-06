@@ -24,7 +24,6 @@ são colocadas em uma única pista Piano.
 import sys
 import struct
 import math
-import traceback
 from pathlib import Path
 
 
@@ -59,7 +58,6 @@ def decode_eop(raw):
     if len(raw) < 0x1BC:
         raise EOPError("arquivo muito pequeno para ser um EOP válido")
 
-    # EOP v200 possui um NUL final não criptografado.
     payload = raw[:-1] if raw and raw[-1] == 0 else raw
 
     decoded = bytearray(len(payload))
@@ -116,9 +114,7 @@ def parse_v200(decoded, header):
     block_count = u32(decoded, 0x20)
 
     if not 1 <= block_count <= 4:
-        raise EOPError(
-            f"EOP 2.00: número de blocos inválido ({block_count})"
-        )
+        raise EOPError(f"EOP 2.00: número de blocos inválido ({block_count})")
 
     mapping_start = 0x1B8 + (block_count - 1) * 0x184
     record_start = mapping_start + 28
@@ -135,7 +131,6 @@ def parse_v200(decoded, header):
     if right_velocity > 127:
         raise EOPError("EOP 2.00: velocity da mão direita inválida")
 
-    # scan code -> (MIDI note, hand)
     mappings = {}
 
     for i in range(255):
@@ -143,11 +138,8 @@ def parse_v200(decoded, header):
         scan_code, action, note = struct.unpack_from("<III", decoded, off)
 
         if scan_code != i + 1:
-            raise EOPError(
-                f"EOP 2.00: registro {i + 1} tem scan code {scan_code}"
-            )
+            raise EOPError(f"EOP 2.00: registro {i + 1} tem scan code {scan_code}")
 
-        # 1 = direita, 0x00010001 = esquerda
         if action == 1:
             if note <= 127:
                 mappings[scan_code] = (note, "right", right_velocity)
@@ -158,9 +150,7 @@ def parse_v200(decoded, header):
     remaining = len(decoded) - event_start
 
     if remaining < 16 or remaining % 16 != 0:
-        raise EOPError(
-            "EOP 2.00: área de eventos não possui registros de 16 bytes"
-        )
+        raise EOPError("EOP 2.00: área de eventos não possui registros de 16 bytes")
 
     record_count = remaining // 16
     terminator = None
@@ -188,23 +178,16 @@ def parse_v200(decoded, header):
             raise EOPError(f"EOP 2.00: timestamp inválido no evento {i}")
 
         if status not in (0x80, 0x90):
-            raise EOPError(
-                f"EOP 2.00: status inválido 0x{status:02X} no evento {i}"
-            )
+            raise EOPError(f"EOP 2.00: status inválido 0x{status:02X} no evento {i}")
 
         if any(decoded[off + j] != 0 for j in range(11, 16)):
-            raise EOPError(
-                f"EOP 2.00: bytes reservados inválidos no evento {i}"
-            )
+            raise EOPError(f"EOP 2.00: bytes reservados inválidos no evento {i}")
 
         if scan_code not in mappings:
-            # Teclas de controle não devem gerar MIDI.
             continue
 
         note, hand, mapped_velocity = mappings[scan_code]
 
-        # Em EOP 2.00 a gravação normalmente deixa velocity do evento em
-        # zero; o valor real da mão fica no cabeçalho da tabela.
         if status == 0x90:
             velocity = mapped_velocity
 
@@ -221,18 +204,12 @@ def parse_v200(decoded, header):
 
 
 def parse_v201_v301(decoded, header):
-    """
-    Implementação do layout comum documentado para EOP 2.01/3.01.
-
-    Nessas versões o mapping identifica a tecla e a nota, mas não fornece
-    a mesma distinção esquerda/direita existente no v200.
-    """
+    """Implementação do layout comum para EOP 2.01/3.01."""
     version = header["version"]
     record_size = 42 if version == 201 else 52
 
     first_section_size = u32(decoded, 0x1B8)
 
-    # Layout comum: [u32 tamanho][seção][u32 tamanho][seção]...
     if first_section_size != 0:
         container_size = u32(decoded, 0x28)
 
@@ -261,16 +238,12 @@ def parse_v201_v301(decoded, header):
             ):
                 raise EOPError("tamanho de seção de mapeamento inválido")
 
-            parse_mapping_records(
-                decoded, section_start, section_size, record_size, mappings
-            )
-
+            parse_mapping_records(decoded, section_start, section_size, record_size, mappings)
             cursor = section_start + section_size
 
         event_start = container_end
 
     else:
-        # Variante v201 com primeiro comprimento zero.
         mapping_container_size = u32(decoded, 0x28)
         event_container_size = u32(decoded, 0x2C)
 
@@ -290,19 +263,14 @@ def parse_v201_v301(decoded, header):
         if mapping_start < 0:
             raise EOPError("posição do mapeamento v201 inválida")
 
-        # A variante zero-section pode possuir a primeira seção sem prefixo.
         found = None
-
         first_size = 28
         while first_size <= event_start - mapping_start:
             try:
                 temp = {}
-                parse_mapping_records(
-                    decoded, mapping_start, first_size, record_size, temp
-                )
+                parse_mapping_records(decoded, mapping_start, first_size, record_size, temp)
 
                 cursor = mapping_start + first_size
-
                 while cursor < event_start:
                     if cursor + 4 > event_start:
                         raise EOPError("seção adicional truncada")
@@ -317,16 +285,12 @@ def parse_v201_v301(decoded, header):
                     ):
                         raise EOPError("seção adicional inválida")
 
-                    parse_mapping_records(
-                        decoded, start, size, record_size, temp
-                    )
+                    parse_mapping_records(decoded, start, size, record_size, temp)
                     cursor = start + size
 
                 if cursor == event_start:
                     if found is not None:
-                        raise EOPError(
-                            "layout v201 ambíguo; mais de uma segmentação válida"
-                        )
+                        raise EOPError("layout v201 ambíguo; mais de uma segmentação válida")
                     found = temp
             except EOPError:
                 pass
@@ -362,9 +326,7 @@ def parse_v201_v301(decoded, header):
             raise EOPError(f"timestamp inválido no evento {i}")
 
         if status not in (0x80, 0x90):
-            raise EOPError(
-                f"status inválido 0x{status:02X} no evento {i}"
-            )
+            raise EOPError(f"status inválido 0x{status:02X} no evento {i}")
 
         if any(decoded[off + j] != 0 for j in range(11, 16)):
             raise EOPError(f"bytes reservados inválidos no evento {i}")
@@ -372,11 +334,8 @@ def parse_v201_v301(decoded, header):
         notes = mappings.get(scan_code)
 
         if notes is None:
-            # Sem mapeamento, não há como saber a nota.
             continue
 
-        # mapping v201/v301 pode teoricamente ter múltiplas notas para
-        # uma mesma tecla.
         for note in notes:
             events.append({
                 "time_ms": timestamp,
@@ -403,16 +362,11 @@ def parse_mapping_records(decoded, section_start, section_size,
 
         if action == 0x0090:
             if note > 127:
-                raise EOPError(
-                    f"nota MIDI inválida {note} no mapeamento"
-                )
-
+                raise EOPError(f"nota MIDI inválida {note} no mapeamento")
             mappings.setdefault(scan_code, set()).add(note)
         else:
-            # Control mapping: a tecla existe, mas não produz nota.
             mappings.setdefault(scan_code, set())
 
-    # Converter sets em listas ordenadas.
     for k in list(mappings):
         mappings[k] = sorted(mappings[k])
 
@@ -426,11 +380,8 @@ def parse_eop(raw):
     elif header["version"] in (201, 301):
         events = parse_v201_v301(decoded, header)
     else:
-        raise EOPError(
-            f"versão EOP não suportada: {header['version']}"
-        )
+        raise EOPError(f"versão EOP não suportada: {header['version']}")
 
-    # Os eventos do EOP são absolutos e devem ser monotônicos.
     last = -1.0
     for e in events:
         if e["time_ms"] < last:
@@ -444,7 +395,6 @@ def vlq(value):
     """MIDI variable-length quantity."""
     value = max(0, int(value))
     buffer = value & 0x7F
-
     out = bytearray()
 
     while True:
@@ -466,21 +416,14 @@ def vlq(value):
 
 
 def ms_to_ticks(ms, bpm):
-    # 480 ticks por semínima.
     return int(round((ms * bpm * PPQ) / 60000.0))
 
 
 def make_track(events, bpm, channel, name):
-    """
-    Cria uma pista MIDI usando timestamps absolutos convertidos em ticks.
-    """
     midi_events = []
 
-    # Nome da pista.
     track_name = name.encode("utf-8", errors="replace")[:127]
     meta_name = b"\xFF\x03" + bytes([len(track_name)]) + track_name
-
-    # Evento de nome no tempo 0.
     midi_events.append((0, 0, meta_name))
 
     for e in events:
@@ -488,37 +431,29 @@ def make_track(events, bpm, channel, name):
             continue
 
         tick = ms_to_ticks(e["time_ms"], bpm)
-
-        # Note-off antes de note-on no mesmo tick ajuda editores MIDI.
         priority = 0 if e["status"] == 0x80 else 1
-
         status = e["status"] | channel
         velocity = e["velocity"] if e["status"] == 0x90 else 0
 
-        data = bytes([
+        midi_events.append((tick, priority, bytes([
             status,
             e["note"] & 0x7F,
             velocity & 0x7F,
-        ])
-
-        midi_events.append((tick, priority, data))
+        ])))
 
     midi_events.sort(key=lambda x: (x[0], x[1]))
 
     track = bytearray()
     previous_tick = 0
-
     for tick, _, data in midi_events:
         delta = tick - previous_tick
         if delta < 0:
             delta = 0
-
         track += vlq(delta)
         track += data
         previous_tick = tick
 
     track += b"\x00\xFF\x2F\x00"
-
     return b"MTrk" + struct.pack(">I", len(track)) + track
 
 
@@ -528,31 +463,23 @@ def make_tempo_track(header, bpm):
     name = b"EOP Tempo"
     track += b"\x00\xFF\x03" + bytes([len(name)]) + name
 
-    # Tempo em microssegundos por semínima.
     mpqn = int(round(60000000 / bpm))
     mpqn = max(1, min(0xFFFFFF, mpqn))
-
     track += b"\x00\xFF\x51\x03"
     track += mpqn.to_bytes(3, "big")
 
-    # Compasso.
     numerator = max(1, min(255, header.get("numerator", 4)))
     denominator = max(1, header.get("denominator", 4))
-
-    # EOP guarda o denominador como 4, 8, etc.
-    # MIDI usa log2(denominador).
     power = 0
     d = denominator
     while d > 1 and d % 2 == 0:
         power += 1
         d //= 2
-
     if d != 1:
         power = 2
 
     track += b"\x00\xFF\x58\x04"
     track += bytes([numerator, power, 24, 8])
-
     track += b"\x00\xFF\x2F\x00"
 
     return b"MTrk" + struct.pack(">I", len(track)) + track
@@ -560,19 +487,11 @@ def make_tempo_track(header, bpm):
 
 def write_midi_format1(header, events, output_path):
     bpm = header["tempo"]
-
     left = [e for e in events if e["hand"] == "left"]
     right = [e for e in events if e["hand"] == "right"]
+    piano = [e for e in events if e["hand"] not in ("left", "right")]
 
-    # Para versões que não têm informação de mão:
-    piano = [
-        e for e in events
-        if e["hand"] not in ("left", "right")
-    ]
-
-    tracks = []
-
-    tracks.append(make_tempo_track(header, bpm))
+    tracks = [make_tempo_track(header, bpm)]
 
     if left or right:
         tracks.append(make_track(left, bpm, 0, "Mao Esquerda"))
@@ -580,10 +499,7 @@ def write_midi_format1(header, events, output_path):
     else:
         tracks.append(make_track(piano, bpm, 0, "Piano"))
 
-    midi_header = (
-        b"MThd" +
-        struct.pack(">IHHH", 6, 1, len(tracks), PPQ)
-    )
+    midi_header = b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks), PPQ)
 
     with open(output_path, "wb") as f:
         f.write(midi_header)
@@ -592,16 +508,7 @@ def write_midi_format1(header, events, output_path):
 
 
 def convert_file(path, output_dir=None):
-    """
-    Convert EOP file to MIDI.
-    
-    Args:
-        path: Path to the EOP file
-        output_dir: Optional output directory. If None, saves to input file directory.
-    
-    Returns:
-        Path to the created MIDI file
-    """
+    """Convert EOP file to MIDI. Writes to the selected output folder if provided."""
     path = Path(path)
 
     if path.suffix.lower() != ".eop":
@@ -610,7 +517,6 @@ def convert_file(path, output_dir=None):
     raw = path.read_bytes()
     header, events = parse_eop(raw)
 
-    # Determine output path
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -618,7 +524,6 @@ def convert_file(path, output_dir=None):
     else:
         output = path.with_suffix(".mid")
 
-    # Evita sobrescrever silenciosamente.
     if output.exists():
         stem = path.stem
         n = 2
@@ -631,16 +536,9 @@ def convert_file(path, output_dir=None):
 
     write_midi_format1(header, events, output)
 
-    left_count = sum(
-        1 for e in events if e["hand"] == "left" and e["status"] == 0x90
-    )
-    right_count = sum(
-        1 for e in events if e["hand"] == "right" and e["status"] == 0x90
-    )
-    piano_count = sum(
-        1 for e in events
-        if e["hand"] not in ("left", "right") and e["status"] == 0x90
-    )
+    left_count = sum(1 for e in events if e["hand"] == "left" and e["status"] == 0x90)
+    right_count = sum(1 for e in events if e["hand"] == "right" and e["status"] == 0x90)
+    piano_count = sum(1 for e in events if e["hand"] not in ("left", "right") and e["status"] == 0x90)
 
     print()
     print("=" * 64)
@@ -663,11 +561,8 @@ def convert_file(path, output_dir=None):
 
 
 def main():
-    # Arrastar arquivos para um .py no Windows entrega os caminhos em argv.
     files = sys.argv[1:]
 
-    # Permite também arrastar arquivos sobre o executável convertido com
-    # PyInstaller.
     if not files:
         print("EOP -> MIDI")
         print()

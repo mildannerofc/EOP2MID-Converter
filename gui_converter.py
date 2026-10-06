@@ -16,17 +16,17 @@ try:
     from PyQt6.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QLabel, QPushButton, QFileDialog, QTextEdit, QComboBox, QFrame,
-        QProgressBar, QStackedWidget, QSplitter, QScrollArea
+        QProgressBar
     )
-    from PyQt6.QtCore import Qt, pyqtSignal, QThread, QTimer, QSize, QUrl
-    from PyQt6.QtGui import QPixmap, QFont, QColor, QPalette, QIcon, QTextCursor
+    from PyQt6.QtCore import Qt, pyqtSignal, QThread, QUrl
+    from PyQt6.QtGui import QPixmap, QFont, QTextCursor
     from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 except ImportError:
     print("PyQt6 is required. Install it with: pip install PyQt6 PyQt6-multimedia")
     sys.exit(1)
 
 # Import the converter
-from eop_to_midi import convert_file, EOPError
+from eop_to_midi import convert_file
 
 
 class ConversionWorker(QThread):
@@ -42,7 +42,7 @@ class ConversionWorker(QThread):
     def run(self):
         try:
             self.progress.emit(f"Converting: {Path(self.file_path).name}...\n")
-            result = convert_file(self.file_path)
+            result = convert_file(self.file_path, self.output_dir)
             self.finished.emit(True, f"Successfully converted: {result}\n")
         except Exception as e:
             self.finished.emit(False, f"Error: {str(e)}\n")
@@ -163,24 +163,22 @@ class EOPConverterGUI(QMainWindow):
         self.setWindowTitle("EOP2MID Converter")
         self.setGeometry(100, 100, 900, 700)
 
-        # Initialize theme and configuration
         self.current_theme = "Light"
         self.config_file = Path.home() / ".eop2mid_config.json"
         self.load_config()
 
-        # Initialize media player for background music
+        self.music_path = Path(__file__).parent / "relaxing_music.mp3"
+        self.music_file_ok = False
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
-        self.audio_output.setVolume(30)  # Default 30% volume
+        self.audio_output.setVolume(0.3)
         self.music_playing = False
 
-        # Setup UI
         self.setup_ui()
         self.apply_theme(self.current_theme)
         self.setup_background_music()
 
-        # Worker thread
         self.worker = None
 
     def setup_ui(self):
@@ -192,10 +190,8 @@ class EOPConverterGUI(QMainWindow):
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Header with logo
         header_layout = QHBoxLayout()
 
-        # Logo
         logo_path = Path(__file__).parent / "converter.png"
         if logo_path.exists():
             logo = QLabel()
@@ -204,7 +200,6 @@ class EOPConverterGUI(QMainWindow):
             logo.setPixmap(pixmap)
             header_layout.addWidget(logo)
 
-        # Title
         title = QLabel("EOP2MID Converter")
         title_font = QFont()
         title_font.setPointSize(18)
@@ -213,7 +208,6 @@ class EOPConverterGUI(QMainWindow):
         header_layout.addWidget(title)
         header_layout.addStretch()
 
-        # Theme selector
         theme_layout = QHBoxLayout()
         theme_label = QLabel("Theme:")
         self.theme_combo = QComboBox()
@@ -232,20 +226,16 @@ class EOPConverterGUI(QMainWindow):
         header_layout.addLayout(theme_layout)
         main_layout.addLayout(header_layout)
 
-        # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         main_layout.addWidget(separator)
 
-        # Content layout
         content_layout = QHBoxLayout()
 
-        # Left panel - File operations
         left_panel = QFrame()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setSpacing(15)
 
-        # Instructions
         instructions = QLabel(
             "Select EOP Files to Convert\n\n"
             "1. Click 'Select Input Files' to choose .EOP files\n"
@@ -259,19 +249,16 @@ class EOPConverterGUI(QMainWindow):
         instructions.setStyleSheet("padding: 15px; border-radius: 6px;")
         left_layout.addWidget(instructions)
 
-        # Input file list
         left_layout.addWidget(QLabel("📥 Input Files:"))
         self.file_list_label = QLabel("No files selected")
         self.file_list_label.setWordWrap(True)
         left_layout.addWidget(self.file_list_label)
 
-        # Output folder display
         left_layout.addWidget(QLabel("📤 Output Folder:"))
         self.output_folder_label = QLabel("Not selected (default: same as input)")
         self.output_folder_label.setWordWrap(True)
         left_layout.addWidget(self.output_folder_label)
 
-        # Buttons
         button_layout = QVBoxLayout()
 
         self.select_input_btn = QPushButton("📁 Select Input Files")
@@ -294,7 +281,6 @@ class EOPConverterGUI(QMainWindow):
         left_layout.addLayout(button_layout)
         left_layout.addStretch()
 
-        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         left_layout.addWidget(QLabel("Progress:"))
@@ -302,7 +288,6 @@ class EOPConverterGUI(QMainWindow):
 
         content_layout.addWidget(left_panel, 1)
 
-        # Right panel - Console output
         right_panel = QFrame()
         right_layout = QVBoxLayout(right_panel)
 
@@ -317,39 +302,41 @@ class EOPConverterGUI(QMainWindow):
         self.console.setFont(QFont("Courier New", 9))
         right_layout.addWidget(self.console)
 
-        # Console buttons
         console_button_layout = QHBoxLayout()
-
         clear_console_btn = QPushButton("Clear Console")
         clear_console_btn.clicked.connect(self.clear_console)
         console_button_layout.addWidget(clear_console_btn)
-
         console_button_layout.addStretch()
         right_layout.addLayout(console_button_layout)
 
         content_layout.addWidget(right_panel, 1)
-
         main_layout.addLayout(content_layout)
 
-        # Status bar
         self.statusBar().showMessage("Ready")
 
-        # Store selected files
         self.selected_files = []
         self.output_folder = None
 
     def setup_background_music(self):
         """Setup background music playback."""
-        music_path = Path(__file__).parent / "relaxing_music.mp3"
-        if music_path.exists():
-            self.media_player.setSource(QUrl.fromLocalFile(str(music_path)))
-            self.log_console("Music file detected.\n")
-        else:
+        if not self.music_path.exists():
+            self.music_file_ok = False
             self.music_btn.setEnabled(False)
-            self.log_console("Background music file not found.\n")
+            self.log_console("Background music file not found. Place relaxing_music.mp3 next to the app.\n")
+            return
+
+        self.music_file_ok = True
+        self.media_player.setSource(QUrl.fromLocalFile(str(self.music_path)))
+        self.music_btn.setEnabled(True)
+        self.log_console("Music file detected.\n")
 
     def toggle_music(self):
         """Toggle background music playback."""
+        if not self.music_file_ok:
+            self.statusBar().showMessage("Music file not available")
+            self.log_console("Music file not available.\n")
+            return
+
         if self.music_playing:
             self.media_player.stop()
             self.music_btn.setText("🎵 Play Music")
@@ -357,11 +344,15 @@ class EOPConverterGUI(QMainWindow):
             self.log_console("⏹ Stopped playing the music.\n")
             self.statusBar().showMessage("Music stopped")
         else:
-            self.media_player.play()
-            self.music_btn.setText("⏸ Stop Music")
-            self.music_playing = True
-            self.log_console("▶ Playing the relaxing music...\n")
-            self.statusBar().showMessage("Music playing")
+            try:
+                self.media_player.play()
+                self.music_btn.setText("⏸ Stop Music")
+                self.music_playing = True
+                self.log_console("▶ Playing the relaxing music...\n")
+                self.statusBar().showMessage("Music playing")
+            except Exception as exc:
+                self.log_console(f"Could not start music: {exc}\n")
+                self.statusBar().showMessage("Music failed to start")
 
     def select_files(self):
         """Open file selection dialog."""
@@ -397,7 +388,7 @@ class EOPConverterGUI(QMainWindow):
         if not self.selected_files:
             self.file_list_label.setText("No files selected")
         else:
-            file_names = "\n".join([Path(f).name for f in self.selected_files])
+            file_names = "\n".join(Path(f).name for f in self.selected_files)
             self.file_list_label.setText(file_names)
 
     def clear_files(self):
@@ -434,11 +425,8 @@ class EOPConverterGUI(QMainWindow):
             self.worker.finished.connect(lambda success, msg: self.on_conversion_finished(success, msg))
             self.worker.finished.connect(self.worker.deleteLater)
             self.worker.start()
-
-            # Wait for worker to complete
             self.worker.wait()
 
-            # Update progress
             progress = int(((index + 1) / total_files) * 100)
             self.progress_bar.setValue(progress)
 
@@ -511,7 +499,6 @@ def main():
     """Main entry point."""
     app = QApplication(sys.argv)
 
-    # Set application icon and metadata
     app.setApplicationName("EOP2MID Converter")
     app.setApplicationVersion("2.0")
 
@@ -523,3 +510,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
