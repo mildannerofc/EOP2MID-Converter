@@ -1,4 +1,4 @@
-name: Build Python Package
+name: Build Executables
 
 on:
   push:
@@ -8,7 +8,20 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            artifact_name: eop2mid-linux
+          - os: windows-latest
+            target: windows
+            artifact_name: eop2mid-windows
+          - os: macos-latest
+            target: macos
+            artifact_name: eop2mid-macos
 
     steps:
       - uses: actions/checkout@v4
@@ -18,10 +31,31 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build tools
+      - name: Install dependencies
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install build
+          python -m pip install pyinstaller
+          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
 
-      - name: Build package
-        run: python -m build
+      - name: Build executable
+        shell: bash
+        run: |
+          pyinstaller --onefile --name eop2mid eop_to_midi.py
+
+      - name: Rename output for platform
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mv dist/eop2mid.exe dist/eop2mid-windows.exe
+          elif [ "${{ runner.os }}" = "Linux" ]; then
+            mv dist/eop2mid dist/eop2mid-linux
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            mv dist/eop2mid dist/eop2mid-macos
+          fi
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/
