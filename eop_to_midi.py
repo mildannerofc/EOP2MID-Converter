@@ -591,7 +591,17 @@ def write_midi_format1(header, events, output_path):
             f.write(track)
 
 
-def convert_file(path):
+def convert_file(path, output_dir=None):
+    """
+    Convert EOP file to MIDI.
+    
+    Args:
+        path: Path to the EOP file
+        output_dir: Optional output directory. If None, saves to input file directory.
+    
+    Returns:
+        Path to the created MIDI file
+    """
     path = Path(path)
 
     if path.suffix.lower() != ".eop":
@@ -600,14 +610,20 @@ def convert_file(path):
     raw = path.read_bytes()
     header, events = parse_eop(raw)
 
-    output = path.with_suffix(".mid")
+    # Determine output path
+    if output_dir:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output = output_dir / path.with_suffix(".mid").name
+    else:
+        output = path.with_suffix(".mid")
 
     # Evita sobrescrever silenciosamente.
     if output.exists():
         stem = path.stem
         n = 2
         while True:
-            candidate = path.with_name(f"{stem}_converted_{n}.mid")
+            candidate = output.parent / f"{stem}_converted_{n}.mid"
             if not candidate.exists():
                 output = candidate
                 break
