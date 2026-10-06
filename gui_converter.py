@@ -37,9 +37,10 @@ class ConversionWorker(QThread):
     progress = pyqtSignal(str)
     finished = pyqtSignal(bool, str)
     
-    def __init__(self, file_path):
+    def __init__(self, file_path, output_dir=None):
         super().__init__()
         self.file_path = file_path
+        self.output_dir = output_dir
     
     def run(self):
         try:
@@ -175,6 +176,7 @@ class EOPConverterGUI(QMainWindow):
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(30)  # Default 30% volume
+        self.music_playing = False
         
         # Setup UI
         self.setup_ui()
@@ -224,8 +226,13 @@ class EOPConverterGUI(QMainWindow):
         self.theme_combo.setMaximumWidth(120)
         theme_layout.addWidget(theme_label)
         theme_layout.addWidget(self.theme_combo)
-        header_layout.addLayout(theme_layout)
         
+        self.music_btn = QPushButton("🎵 Play Music")
+        self.music_btn.clicked.connect(self.toggle_music)
+        self.music_btn.setMaximumWidth(150)
+        theme_layout.addWidget(self.music_btn)
+        
+        header_layout.addLayout(theme_layout)
         main_layout.addLayout(header_layout)
         
         # Separator
@@ -244,8 +251,8 @@ class EOPConverterGUI(QMainWindow):
         # Instructions
         instructions = QLabel(
             "Select EOP Files to Convert\n\n"
-            "1. Click 'Select Files' to choose .EOP files\n"
-            "2. Or drag and drop files here\n"
+            "1. Click 'Select Input Files' to choose .EOP files\n"
+            "2. Click 'Select Output Folder' to set MIDI destination\n"
             "3. Click 'Convert' to start\n"
             "4. Monitor progress in the console"
         )
@@ -255,18 +262,28 @@ class EOPConverterGUI(QMainWindow):
         instructions.setStyleSheet("padding: 15px; border-radius: 6px;")
         left_layout.addWidget(instructions)
         
-        # File list display
+        # Input file list
+        left_layout.addWidget(QLabel("📥 Input Files:"))
         self.file_list_label = QLabel("No files selected")
         self.file_list_label.setWordWrap(True)
-        left_layout.addWidget(QLabel("Selected Files:"))
         left_layout.addWidget(self.file_list_label)
+        
+        # Output folder display
+        left_layout.addWidget(QLabel("📤 Output Folder:"))
+        self.output_folder_label = QLabel("Not selected (default: same as input)")
+        self.output_folder_label.setWordWrap(True)
+        left_layout.addWidget(self.output_folder_label)
         
         # Buttons
         button_layout = QVBoxLayout()
         
-        self.select_btn = QPushButton("📁 Select Files")
-        self.select_btn.clicked.connect(self.select_files)
-        button_layout.addWidget(self.select_btn)
+        self.select_input_btn = QPushButton("📁 Select Input Files")
+        self.select_input_btn.clicked.connect(self.select_files)
+        button_layout.addWidget(self.select_input_btn)
+        
+        self.select_output_btn = QPushButton("📂 Select Output Folder")
+        self.select_output_btn.clicked.connect(self.select_output_folder)
+        button_layout.addWidget(self.select_output_btn)
         
         self.convert_btn = QPushButton("▶ Convert")
         self.convert_btn.clicked.connect(self.start_conversion)
@@ -322,13 +339,32 @@ class EOPConverterGUI(QMainWindow):
         
         # Store selected files
         self.selected_files = []
+        self.output_folder = None
     
     def setup_background_music(self):
         """Setup background music playback."""
         music_path = Path(__file__).parent / "relaxing_music.mp3"
         if music_path.exists():
             self.media_player.setSource(QUrl.fromLocalFile(str(music_path)))
+            self.log_console("Music file detected.\n")
+        else:
+            self.music_btn.setEnabled(False)
+            self.log_console("Background music file not found.\n")
+    
+    def toggle_music(self):
+        """Toggle background music playback."""
+        if self.music_playing:
+            self.media_player.stop()
+            self.music_btn.setText("🎵 Play Music")
+            self.music_playing = False
+            self.log_console("⏹ Stopped playing the music.\n")
+            self.statusBar().showMessage("Music stopped")
+        else:
             self.media_player.play()
+            self.music_btn.setText("⏸ Stop Music")
+            self.music_playing = True
+            self.log_console("▶ Playing the relaxing music...\n")
+            self.statusBar().showMessage("Music playing")
     
     def select_files(self):
         """Open file selection dialog."""
@@ -346,41 +382,57 @@ class EOPConverterGUI(QMainWindow):
             self.statusBar().showMessage(f"{len(files)} file(s) selected")
             self.log_console(f"Selected {len(files)} file(s) for conversion\n")
     
+    def select_output_folder(self):
+        """Choose where the MIDI output should be saved."""
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Folder",
+            ""
+        )
+        if folder:
+            self.output_folder = folder
+            self.output_folder_label.setText(folder)
+            self.statusBar().showMessage("Output folder selected")
+            self.log_console(f"Output folder selected: {folder}\n")
+    
     def update_file_list_display(self):
         """Update the file list display."""
         if not self.selected_files:
             self.file_list_label.setText("No files selected")
         else:
-            file_names = "\n".join([Path(f).name for f in self.selected_files])
+            file_names = "\\n".join([Path(f).name for f in self.selected_files])
             self.file_list_label.setText(file_names)
     
     def clear_files(self):
         """Clear selected files."""
         self.selected_files = []
+        self.output_folder = None
         self.update_file_list_display()
+        self.output_folder_label.setText("Not selected (default: same as input)")
         self.convert_btn.setEnabled(False)
         self.progress_bar.setValue(0)
         self.statusBar().showMessage("File selection cleared")
-        self.log_console("File selection cleared\n")
+        self.log_console("File selection cleared\\n")
     
     def start_conversion(self):
-        """Start the conversion process."""
+        \"\"\"Start the conversion process.\"\"\"
         if not self.selected_files:
-            self.log_console("No files selected for conversion\n")
+            self.log_console(\"No files selected for conversion\\n\")
             return
         
         self.convert_btn.setEnabled(False)
-        self.select_btn.setEnabled(False)
+        self.select_input_btn.setEnabled(False)
+        self.select_output_btn.setEnabled(False)
         self.progress_bar.setValue(0)
         
-        self.log_console(f"\n{'='*60}\n")
-        self.log_console(f"Starting conversion at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        self.log_console(f"{'='*60}\n\n")
+        self.log_console(f\"\\n{'='*60}\\n\")
+        self.log_console(f\"Starting conversion at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\")
+        self.log_console(f\"{'='*60}\\n\\n\")
         
         total_files = len(self.selected_files)
         
         for index, file_path in enumerate(self.selected_files):
-            self.worker = ConversionWorker(file_path)
+            self.worker = ConversionWorker(file_path, self.output_folder)
             self.worker.progress.connect(self.log_console)
             self.worker.finished.connect(lambda success, msg: self.on_conversion_finished(success, msg))
             self.worker.finished.connect(self.worker.deleteLater)
@@ -393,77 +445,78 @@ class EOPConverterGUI(QMainWindow):
             progress = int(((index + 1) / total_files) * 100)
             self.progress_bar.setValue(progress)
         
-        self.log_console(f"\n{'='*60}\n")
-        self.log_console(f"Conversion completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        self.log_console(f"{'='*60}\n")
+        self.log_console(f\"\\n{'='*60}\\n\")
+        self.log_console(f\"Conversion completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\")
+        self.log_console(f\"{'='*60}\\n\")
         
         self.convert_btn.setEnabled(True)
-        self.select_btn.setEnabled(True)
-        self.statusBar().showMessage("Conversion completed")
+        self.select_input_btn.setEnabled(True)
+        self.select_output_btn.setEnabled(True)
+        self.statusBar().showMessage(\"Conversion completed\")
     
     def on_conversion_finished(self, success, message):
-        """Handle conversion completion."""
+        \"\"\"Handle conversion completion.\"\"\"
         self.log_console(message)
     
     def log_console(self, message):
-        """Log message to console."""
+        \"\"\"Log message to console.\"\"\"
         self.console.moveCursor(QTextCursor.MoveOperation.End)
         self.console.insertPlainText(message)
         self.console.moveCursor(QTextCursor.MoveOperation.End)
     
     def clear_console(self):
-        """Clear console output."""
+        \"\"\"Clear console output.\"\"\"
         self.console.clear()
-        self.log_console("Console cleared\n")
+        self.log_console(\"Console cleared\\n\")
     
     def on_theme_changed(self, theme_name):
-        """Handle theme change."""
+        \"\"\"Handle theme change.\"\"\"
         self.current_theme = theme_name
         self.apply_theme(theme_name)
         self.save_config()
     
     def apply_theme(self, theme_name):
-        """Apply theme to the application."""
+        \"\"\"Apply theme to the application.\"\"\"
         theme = ThemeManager.THEMES.get(theme_name, ThemeManager.LIGHT_THEME)
         stylesheet = ThemeManager.get_stylesheet(theme)
         self.setStyleSheet(stylesheet)
     
     def save_config(self):
-        """Save user configuration."""
+        \"\"\"Save user configuration.\"\"\"
         config = {
-            "theme": self.current_theme,
-            "volume": self.audio_output.volume(),
+            \"theme\": self.current_theme,
+            \"volume\": self.audio_output.volume(),
         }
         try:
-            with open(self.config_file, "w") as f:
+            with open(self.config_file, \"w\") as f:
                 json.dump(config, f)
         except Exception as e:
-            print(f"Could not save config: {e}")
+            print(f\"Could not save config: {e}\")
     
     def load_config(self):
-        """Load user configuration."""
+        \"\"\"Load user configuration.\"\"\"
         if self.config_file.exists():
             try:
-                with open(self.config_file, "r") as f:
+                with open(self.config_file, \"r\") as f:
                     config = json.load(f)
-                    self.current_theme = config.get("theme", "Light")
+                    self.current_theme = config.get(\"theme\", \"Light\")
             except Exception as e:
-                print(f"Could not load config: {e}")
+                print(f\"Could not load config: {e}\")
     
     def closeEvent(self, event):
-        """Handle application close."""
+        \"\"\"Handle application close.\"\"\"
         self.media_player.stop()
         self.save_config()
         event.accept()
 
 
 def main():
-    """Main entry point."""
+    \"\"\"Main entry point.\"\"\"
     app = QApplication(sys.argv)
     
     # Set application icon and metadata
-    app.setApplicationName("EOP2MID Converter")
-    app.setApplicationVersion("2.0")
+    app.setApplicationName(\"EOP2MID Converter\")
+    app.setApplicationVersion(\"2.0\")
     
     window = EOPConverterGUI()
     window.show()
@@ -471,5 +524,5 @@ def main():
     sys.exit(app.exec())
 
 
-if __name__ == "__main__":
+if __name__ == \"__main__\":
     main()
