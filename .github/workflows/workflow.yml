@@ -11,13 +11,7 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.9", "3.10", "3.11"]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -26,7 +20,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
 
       - name: Install dependencies
         shell: bash
@@ -34,55 +28,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller PyQt6 pillow
 
-      - name: Convert icon for Windows
-        if: runner.os == 'Windows'
-        shell: python
-        run: |
-          from PIL import Image
-
-          img = Image.open("converter.png")
-          rgba = img.convert("RGBA")
-          rgba.save("converter.ico")
-
-      - name: Build CLI converter (Windows)
-        if: runner.os == 'Windows'
+      - name: Build CLI converter
         shell: bash
         run: |
           pyinstaller --onefile \
             --name eop_to_midi \
-            --icon=converter.ico \
-            --add-data "converter.ico;." \
-            eop_to_midi.py
-
-      - name: Build CLI converter (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          pyinstaller --onefile \
-            --name eop_to_midi \
-            --icon=converter.png \
             --add-data "converter.png:." \
             eop_to_midi.py
 
-      - name: Build GUI converter (Windows)
-        if: runner.os == 'Windows'
+      - name: Build GUI converter
         shell: bash
         run: |
           pyinstaller --onefile \
             --windowed \
             --name EOP2MID-GUI \
-            --icon=converter.ico \
-            --add-data "converter.ico;." \
-            gui_converter.py
-
-      - name: Build GUI converter (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          pyinstaller --onefile \
-            --windowed \
-            --name EOP2MID-GUI \
-            --icon=converter.png \
             --add-data "converter.png:." \
             gui_converter.py
 
@@ -90,14 +49,10 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp dist/*.exe artifacts/ || true
-          else
-            cp dist/* artifacts/ || true
-          fi
+          cp dist/* artifacts/ || true
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: eop2mid-${{ runner.os }}-py${{ matrix.python-version }}
+          name: eop2mid-ubuntu-py3.11
           path: artifacts/*
