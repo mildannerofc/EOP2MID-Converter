@@ -9,7 +9,6 @@ Features: Theme switching (Light/Dark), console output, and drag-and-drop suppor
 
 import json
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -154,35 +153,6 @@ class ThemeManager:
         """
 
 
-class AudioGenerator:
-    """Generate a tiny silent WAV as a fallback when no audio file is bundled."""
-
-    @staticmethod
-    def create_silence_wav(duration_seconds=1):
-        import struct
-        sample_rate = 44100
-        num_samples = int(sample_rate * duration_seconds)
-        byte_rate = sample_rate * 1 * 2
-        block_align = 2
-        data_size = num_samples * block_align
-
-        header = b'RIFF'
-        header += struct.pack('<I', 36 + data_size)
-        header += b'WAVE'
-        header += b'fmt '
-        header += struct.pack('<I', 16)
-        header += struct.pack('<H', 1)
-        header += struct.pack('<H', 1)
-        header += struct.pack('<I', sample_rate)
-        header += struct.pack('<I', byte_rate)
-        header += struct.pack('<H', block_align)
-        header += struct.pack('<H', 16)
-        header += b'data'
-        header += struct.pack('<I', data_size)
-        header += b'\x00' * data_size
-        return header
-
-
 class EOPConverterGUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -193,15 +163,37 @@ class EOPConverterGUI(QMainWindow):
         self.config_file = Path.home() / ".eop2mid_config.json"
         self.load_config()
 
-        self.music_path = Path(__file__).parent / "relaxing_music.mp3"
-        self.music_file_ok = False
-        self.temp_audio_file = None
+        # MP3 is the primary format. WAV is supported as an optional fallback.
+        music_dir = Path(__file__).parent
+        self.music_candidates = [
+            music_dir / "relaxing_music.mp3",
+            music_dir / "relaxing_music.MP3",
+            music_dir / "relaxing_music.wav",
+            music_dir / "relaxing_music.WAV",
+        ]
+        self.music_candidates = [
+            path for path in self.music_candidates if path.is_file()
+        ]
+        self.music_index = 0
+        self.music_path = (
+            self.music_candidates[self.music_index]
+            if self.music_candidates else None
+        )
 
-        self.media_player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
-        self.media_player.setAudioOutput(self.audio_output)
-        self.audio_output.setVolume(0.3)
+        self.music_file_ok = False
         self.music_playing = False
+        self.music_start_pending = False
+
+        self.media_player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput(self)
+        self.media_player.setAudioOutput(self.audio_output)
+        self.audio_output.setVolume(getattr(self, "saved_volume", 0.3))
+
+        # setSource() is asynchronous; decoder/backend failures arrive via
+        # these signals instead of Python exceptions.
+        self.media_player.errorOccurred.connect(self.on_media_error)
+        self.media_player.playbackStateChanged.connect(self.on_playback_state_changed)
+        self.media_player.mediaStatusChanged.connect(self.on_media_status_changed)
 
         self.setup_ui()
         self.apply_theme(self.current_theme)
@@ -210,26 +202,93 @@ class EOPConverterGUI(QMainWindow):
         self.worker = None
 
     def setup_audio(self):
-        if self.music_path.exists():
-            try:
-                self.media_player.setSource(QUrl.fromLocalFile(str(self.music_path)))
-                self.music_file_ok = True
-                self.log_console("Music file detected.\n")
-                return
-            except Exception as exc:
-                self.log_console(f"Could not load music file: {exc}\n")
-
-        try:
-            wav_data = AudioGenerator.create_silence_wav(1)
-            self.temp_audio_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-            self.temp_audio_file.write(wav_data)
-            self.temp_audio_file.close()
-            self.media_player.setSource(QUrl.fromLocalFile(self.temp_audio_file.name))
-            self.music_file_ok = True
-            self.log_console("Fallback audio ready.\n")
-        except Exception as exc:
-            self.log_console(f"Audio fallback failed: {exc}\n")
+        """Load the primary MP3, with WAV available as a real fallback."""
+        if not self.music_candidates:
+            self.music_file_ok = False
             self.music_btn.setEnabled(False)
+            self.log_console(
+                "No music file found. Add relaxing_music.mp3 (preferred) "
+                "or relaxing_music.wav beside the program.\n"
+            )
+            return
+
+        self.load_current_audio()
+
+    def load_current_audio(self):
+        self.music_path = self.music_candidates[self.music_index]
+        self.media_player.stop()
+        self.media_player.setSource(
+            QUrl.fromLocalFile(str(self.music_path.resolve()))
+        )
+        self.music_file_ok = True
+        self.music_playing = False
+        self.music_start_pending = False
+        self.music_btn.setEnabled(True)
+        self.music_btn.setText("🎵 Play Music")
+        self.log_console(
+            f"Music file selected: {self.music_path.name} "
+            f"({self.music_path.suffix.lower()[1:]}).\n"
+        )
+        self.statusBar().showMessage(f"Music ready: {self.music_path.name}")
+
+    def try_next_audio_file(self):
+        """Switch from a failed MP3 to an available WAV fallback, if present."""
+        if self.music_index + 1 >= len(self.music_candidates):
+            return False
+
+        self.music_index += 1
+        self.log_console(
+            f"Trying audio fallback: "
+            f"{self.music_candidates[self.music_index].name}\n"
+        )
+        self.load_current_audio()
+        return True
+
+    def on_media_error(self, error, error_string):
+        """Report decoder failures and automatically try the optional WAV."""
+        error_name = getattr(error, "name", str(error))
+        message = error_string or "Unknown multimedia backend error"
+        self.music_playing = False
+        self.music_start_pending = False
+        self.music_btn.setText("🎵 Play Music")
+        self.log_console(
+            f"Audio playback error ({error_name}): {message}\n"
+        )
+
+        if self.try_next_audio_file():
+            self.log_console(
+                "The previous audio format could not be decoded; "
+                "the fallback file is ready.\n"
+            )
+            return
+
+        self.statusBar().showMessage("Music failed to play")
+
+    def on_media_status_changed(self, status):
+        if status == QMediaPlayer.MediaStatus.InvalidMedia:
+            self.music_playing = False
+            self.music_start_pending = False
+            self.music_btn.setText("🎵 Play Music")
+            self.log_console(
+                "The multimedia backend rejected the selected audio file.\n"
+            )
+            if not self.try_next_audio_file():
+                self.statusBar().showMessage("Invalid/unsupported audio file")
+
+    def on_playback_state_changed(self, state):
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.music_playing = True
+            self.music_start_pending = False
+            self.music_btn.setText("⏸ Stop Music")
+            self.log_console("▶ Music is actually playing.\n")
+            self.statusBar().showMessage("Music playing")
+        elif state == QMediaPlayer.PlaybackState.StoppedState:
+            was_active = self.music_playing or self.music_start_pending
+            self.music_playing = False
+            self.music_start_pending = False
+            self.music_btn.setText("🎵 Play Music")
+            if was_active:
+                self.statusBar().showMessage("Music stopped")
 
     def setup_ui(self):
         central_widget = QWidget()
@@ -372,22 +431,22 @@ class EOPConverterGUI(QMainWindow):
             self.log_console("Music not available.\n")
             return
 
-        if self.music_playing:
+        if self.music_playing or self.music_start_pending:
             self.media_player.stop()
-            self.music_btn.setText("🎵 Play Music")
             self.music_playing = False
+            self.music_start_pending = False
+            self.music_btn.setText("🎵 Play Music")
             self.log_console("⏹ Stopped playing the music.\n")
             self.statusBar().showMessage("Music stopped")
-        else:
-            try:
-                self.media_player.play()
-                self.music_btn.setText("⏸ Stop Music")
-                self.music_playing = True
-                self.log_console("▶ Playing the relaxing music...\n")
-                self.statusBar().showMessage("Music playing")
-            except Exception as exc:
-                self.log_console(f"Could not start music: {exc}\n")
-                self.statusBar().showMessage("Music failed to start")
+            return
+
+        if self.media_player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia:
+            self.media_player.setPosition(0)
+
+        self.music_start_pending = True
+        self.media_player.play()
+        self.log_console(f"▶ Starting {self.music_path.name}...\n")
+        self.statusBar().showMessage("Starting music...")
 
     def select_files(self):
         files, _ = QFileDialog.getOpenFileNames(
@@ -502,21 +561,20 @@ class EOPConverterGUI(QMainWindow):
             print(f"Could not save config: {e}")
 
     def load_config(self):
+        self.saved_volume = 0.3
         if self.config_file.exists():
             try:
-                with open(self.config_file, "r") as f:
+                with open(self.config_file, "r", encoding="utf-8") as f:
                     config = json.load(f)
                     self.current_theme = config.get("theme", "Light")
+                    self.saved_volume = max(
+                        0.0, min(1.0, float(config.get("volume", 0.3)))
+                    )
             except Exception as e:
                 print(f"Could not load config: {e}")
 
     def closeEvent(self, event):
         self.media_player.stop()
-        if self.temp_audio_file:
-            try:
-                Path(self.temp_audio_file.name).unlink(missing_ok=True)
-            except Exception:
-                pass
         self.save_config()
         event.accept()
 
