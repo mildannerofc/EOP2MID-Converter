@@ -1,0 +1,10 @@
+# EOP2MID Converter Requirements
+# Core dependencies
+# (eop_to_midi.py has no external dependencies)
+
+# GUI and Multimedia (optional, required only for gui_converter.py)
+PyQt6==6.6.1
+PyQt6-multimedia==6.6.1
+
+# Building executables (optional)
+pyinstaller==6.1.0
