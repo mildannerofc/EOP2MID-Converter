@@ -33,6 +33,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller PyQt6 pillow
 
+      - name: Validate Python syntax
+        shell: bash
+        run: |
+          python -m py_compile gui_converter.py eop_to_midi.py
+
       - name: Convert icon for Windows
         if: runner.os == 'Windows'
         shell: python
@@ -72,6 +77,7 @@ jobs:
             --name EOP2MID-GUI \
             --icon=converter.ico \
             --add-data "converter.ico;." \
+            --collect-all PyQt6 \
             gui_converter.py
 
       - name: Build GUI converter (Linux/macOS)
@@ -83,6 +89,7 @@ jobs:
             --name EOP2MID-GUI \
             --icon=converter.png \
             --add-data "converter.png:." \
+            --collect-all PyQt6 \
             gui_converter.py
 
       - name: Prepare artifact folder
