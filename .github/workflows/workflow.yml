@@ -32,9 +32,30 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller PyQt6
+          pip install pyinstaller PyQt6 pillow
 
-      - name: Build CLI converter
+      - name: Convert icon for Windows
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          from PIL import Image
+
+          img = Image.open("converter.png")
+          rgba = img.convert("RGBA")
+          rgba.save("converter.ico")
+
+      - name: Build CLI converter (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --onefile \
+            --name eop_to_midi \
+            --icon=converter.ico \
+            --add-data "converter.ico;." \
+            eop_to_midi.py
+
+      - name: Build CLI converter (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           pyinstaller --onefile \
@@ -43,7 +64,19 @@ jobs:
             --add-data "converter.png:." \
             eop_to_midi.py
 
-      - name: Build GUI converter
+      - name: Build GUI converter (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --onefile \
+            --windowed \
+            --name EOP2MID-GUI \
+            --icon=converter.ico \
+            --add-data "converter.ico;." \
+            gui_converter.py
+
+      - name: Build GUI converter (Linux/macOS)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           pyinstaller --onefile \
