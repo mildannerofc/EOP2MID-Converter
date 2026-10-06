@@ -2,60 +2,69 @@ name: Build Executables
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   pull_request:
-    branches: ["main"]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux
-            artifact_name: eop2mid-linux
-          - os: windows-latest
-            target: windows
-            artifact_name: eop2mid-windows
-          - os: macos-latest
-            target: macos
-            artifact_name: eop2mid-macos
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.10", "3.11"]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller
-          if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+          pip install pyinstaller PyQt6
 
-      - name: Build executable
+      - name: Build CLI converter
         shell: bash
         run: |
-          pyinstaller --onefile --name eop2mid eop_to_midi.py
+          pyinstaller --onefile \
+            --name eop_to_midi \
+            --icon=converter.png \
+            --add-data "converter.png:." \
+            eop_to_midi.py
 
-      - name: Rename output for platform
+      - name: Build GUI converter
         shell: bash
         run: |
+          pyinstaller --onefile \
+            --windowed \
+            --name EOP2MID-GUI \
+            --icon=converter.png \
+            --add-data "converter.png:." \
+            gui_converter.py
+
+      - name: Prepare artifact folder
+        shell: bash
+        run: |
+          mkdir -p artifacts
           if [ "${{ runner.os }}" = "Windows" ]; then
-            mv dist/eop2mid.exe dist/eop2mid-windows.exe
-          elif [ "${{ runner.os }}" = "Linux" ]; then
-            mv dist/eop2mid dist/eop2mid-linux
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            mv dist/eop2mid dist/eop2mid-macos
+            cp dist/*.exe artifacts/ || true
+          else
+            cp dist/* artifacts/ || true
           fi
 
-      - name: Upload executable artifact
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: dist/
+          name: eop2mid-${{ runner.os }}-py${{ matrix.python-version }}
+          path: artifacts/*
