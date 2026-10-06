@@ -1,0 +1,25 @@
+{
+  "name": "eop2mid-converter",
+  "version": "1.0.0",
+  "description": "EveryonePiano format to MIDI converter (Python-based)",
+  "main": "index.js",
+  "keywords": [
+    "eop",
+    "midi",
+    "converter",
+    "music",
+    "audio",
+    "everyone-piano",
+    "format-conversion"
+  ],
+  "author": "mildannerofc",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mildannerofc/EOP2MID-Converter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mildannerofc/EOP2MID-Converter/issues"
+  },
+  "homepage": "https://github.com/mildannerofc/EOP2MID-Converter#readme"
+}
