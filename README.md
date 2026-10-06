@@ -1,2 +1,8 @@
-# EOP2MID-Converter
-EveryonePiano format to MIDI converter (Python-based)
+<div align="center">
+  <img src="converter.png" alt="Logo Converter" width="300">
+  
+  # EOP to MIDI Converter
+</div>
+This program is made only to convert EveryonePiano recordings and also some existings demos to MIDI, this is also suitable for soundfont recreations and music reverse engineer for EveryonePiano's music format.
+## AI disclosure
+This program's language is Python, it is made with help of ChatGPT. The assets are still my own.
