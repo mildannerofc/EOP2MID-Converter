@@ -33,6 +33,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller PyQt6 pillow
 
+      - name: Validate required music asset
+        shell: bash
+        run: |
+          if [ ! -f "relaxing_music.mp3" ]; then
+            echo "ERROR: relaxing_music.mp3 is required in the repository root."
+            exit 1
+          fi
+          echo "Bundling relaxing_music.mp3 into the GUI executable."
+
       - name: Validate Python syntax
         shell: bash
         run: |
@@ -72,24 +81,39 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
+          AUDIO_DATA='--add-data relaxing_music.mp3;.'
+          if [ -f "relaxing_music.wav" ]; then
+            AUDIO_DATA="$AUDIO_DATA --add-data relaxing_music.wav;."
+          fi
+
           pyinstaller --onefile \
             --windowed \
             --name EOP2MID-GUI \
             --icon=converter.ico \
             --add-data "converter.ico;." \
+            --add-data "converter.png;." \
+            $AUDIO_DATA \
             --collect-all PyQt6 \
+            --collect-submodules PyQt6.QtMultimedia \
             gui_converter.py
 
       - name: Build GUI converter (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         run: |
+          AUDIO_DATA='--add-data relaxing_music.mp3:.'
+          if [ -f "relaxing_music.wav" ]; then
+            AUDIO_DATA="$AUDIO_DATA --add-data relaxing_music.wav:."
+          fi
+
           pyinstaller --onefile \
             --windowed \
             --name EOP2MID-GUI \
             --icon=converter.png \
             --add-data "converter.png:." \
+            $AUDIO_DATA \
             --collect-all PyQt6 \
+            --collect-submodules PyQt6.QtMultimedia \
             gui_converter.py
 
       - name: Prepare artifact folder

@@ -164,7 +164,15 @@ class EOPConverterGUI(QMainWindow):
         self.load_config()
 
         # MP3 is the primary format. WAV is supported as an optional fallback.
-        music_dir = Path(__file__).parent
+        # When packaged with PyInstaller --onefile, bundled files are extracted
+        # to sys._MEIPASS at runtime.  Looking only beside __file__ makes the
+        # bundled MP3 invisible, which is why the previous build reported
+        # "No music file found".  For a normal .py run, use the source folder.
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            music_dir = Path(sys._MEIPASS)
+        else:
+            music_dir = Path(__file__).resolve().parent
+
         self.music_candidates = [
             music_dir / "relaxing_music.mp3",
             music_dir / "relaxing_music.MP3",
@@ -207,8 +215,8 @@ class EOPConverterGUI(QMainWindow):
             self.music_file_ok = False
             self.music_btn.setEnabled(False)
             self.log_console(
-                "No music file found. Add relaxing_music.mp3 (preferred) "
-                "or relaxing_music.wav beside the program.\n"
+                "No bundled music file was found. The build must include "
+                "relaxing_music.mp3 (preferred) or relaxing_music.wav.\n"
             )
             return
 
