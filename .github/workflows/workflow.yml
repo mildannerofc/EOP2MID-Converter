@@ -11,7 +11,12 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout repository
@@ -28,20 +33,55 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller PyQt6 pillow
 
-      - name: Build CLI converter
+      - name: Convert icon for Windows
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          from PIL import Image
+
+          img = Image.open("converter.png")
+          rgba = img.convert("RGBA")
+          rgba.save("converter.ico")
+
+      - name: Build CLI converter (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           pyinstaller --onefile \
             --name eop_to_midi \
+            --icon=converter.ico \
+            --add-data "converter.ico;." \
+            eop_to_midi.py
+
+      - name: Build CLI converter (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --onefile \
+            --name eop_to_midi \
+            --icon=converter.png \
             --add-data "converter.png:." \
             eop_to_midi.py
 
-      - name: Build GUI converter
+      - name: Build GUI converter (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
           pyinstaller --onefile \
             --windowed \
             --name EOP2MID-GUI \
+            --icon=converter.ico \
+            --add-data "converter.ico;." \
+            gui_converter.py
+
+      - name: Build GUI converter (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --onefile \
+            --windowed \
+            --name EOP2MID-GUI \
+            --icon=converter.png \
             --add-data "converter.png:." \
             gui_converter.py
 
@@ -49,10 +89,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts
-          cp dist/* artifacts/ || true
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp dist/*.exe artifacts/ || true
+          else
+            cp dist/* artifacts/ || true
+          fi
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: eop2mid-ubuntu-py3.11
+          name: eop2mid-${{ runner.os }}-py3.11
           path: artifacts/*
